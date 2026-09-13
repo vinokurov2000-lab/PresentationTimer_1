@@ -1,0 +1,48 @@
+name: Publish Presentation Timer v5
+
+on:
+  push:
+    paths:
+      - ".github/workflows/release-v5.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Create v5.0.0 release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          if gh release view v5.0.0 >/dev/null 2>&1; then
+            echo "Release v5.0.0 already exists."
+          else
+            gh release create v5.0.0 \
+              PresentationTimer-v5.exe \
+              PresentationTimer-v5-source-and-app.zip \
+              --title "Presentation Timer v5.0.0" \
+              --notes-file - <<'EOF'
+          Новая версия таймера для презентаций.
+
+          Основные изменения:
+          - «Умное стекло» используется как основная тема;
+          - добавлены темы «Эфирный минимализм» и «Кольцо прогресса»;
+          - снижена нагрузка на процессор за счёт кэширования фона;
+          - улучшена работа с несколькими мониторами и масштабированием DPI;
+          - визуальные настройки применяются без сброса отсчёта;
+          - сохраняется скрытое состояние таймера;
+          - добавлена проверка конфликтов глобальных горячих клавиш;
+          - встроены три WAV-сигнала и кнопка предварительного прослушивания;
+          - добавлены собственная иконка и наглядная справка по Ctrl+Alt+F1;
+          - исходный код разделён на модули.
+
+          Совместимость: Windows 10/11, 64-bit.
+          Установка и .NET не требуются.
+          EOF
+          fi
