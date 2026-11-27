@@ -5,6 +5,7 @@
 
 BOOL RendererInitialize(HWND window, const Settings *settings);
 BOOL RendererApplySettings(HWND window, const Settings *settings);
+BOOL RendererRefreshContrast(HWND window, const Settings *settings);
 void RendererDraw(HWND window, const Settings *settings, ULONGLONG shown_seconds,
                   ULONGLONG remaining_ms, ULONGLONG duration_ms,
                   BOOL expired, BOOL blink_white);

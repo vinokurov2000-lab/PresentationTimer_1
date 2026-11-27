@@ -1,4 +1,5 @@
 #include "renderer.h"
+#include "contrast.h"
 #include <math.h>
 #include <stdlib.h>
 #include <string.h>
@@ -14,6 +15,12 @@ typedef struct {
     uint32_t *pixels;
     uint32_t *mask;
     uint32_t *base;
+    HDC contrast_dc;
+    HBITMAP contrast_bitmap;
+    HGDIOBJ contrast_old;
+    uint32_t *contrast_pixels;
+    BOOL contrast_ready;
+    COLORREF auto_color;
     HFONT font;
     int width;
     int height;
@@ -58,6 +65,12 @@ static BOOL InRoundedRect(int x, int y, int left, int top, int right, int bottom
 }
 
 static void DestroyBuffers(void) {
+    if (g_renderer.contrast_dc && g_renderer.contrast_old) SelectObject(g_renderer.contrast_dc, g_renderer.contrast_old);
+    if (g_renderer.contrast_bitmap) DeleteObject(g_renderer.contrast_bitmap);
+    if (g_renderer.contrast_dc) DeleteDC(g_renderer.contrast_dc);
+    g_renderer.contrast_bitmap = NULL; g_renderer.contrast_dc = NULL;
+    g_renderer.contrast_pixels = NULL; g_renderer.contrast_old = NULL;
+    g_renderer.contrast_ready = FALSE;
     if (g_renderer.dest_dc && g_renderer.old_dest) SelectObject(g_renderer.dest_dc, g_renderer.old_dest);
     if (g_renderer.mask_dc && g_renderer.old_mask) SelectObject(g_renderer.mask_dc, g_renderer.old_mask);
     if (g_renderer.dest_bitmap) DeleteObject(g_renderer.dest_bitmap);
@@ -156,6 +169,71 @@ static void BuildBase(const Settings *s) {
     else if (s->theme == THEME_RING) BuildRingBase(s);
 }
 
+
+#define SAMPLE_W 11
+#define SAMPLE_H 7
+
+static BOOL InitContrastBuffer(void) {
+    if (g_renderer.contrast_dc) return TRUE;
+    BITMAPINFO bi = {0};
+    bi.bmiHeader.biSize = sizeof(BITMAPINFOHEADER);
+    bi.bmiHeader.biWidth = SAMPLE_W;
+    bi.bmiHeader.biHeight = -SAMPLE_H;
+    bi.bmiHeader.biPlanes = 1;
+    bi.bmiHeader.biBitCount = 32;
+    bi.bmiHeader.biCompression = BI_RGB;
+    HDC dc = CreateCompatibleDC(g_renderer.screen);
+    if (!dc) return FALSE;
+    HBITMAP bmp = CreateDIBSection(g_renderer.screen, &bi, DIB_RGB_COLORS,
+                                   (void **)&g_renderer.contrast_pixels, NULL, 0);
+    if (!bmp || !g_renderer.contrast_pixels) {
+        if (bmp) DeleteObject(bmp);
+        DeleteDC(dc); return FALSE;
+    }
+    HGDIOBJ old = SelectObject(dc, bmp);
+    if (!old || old == HGDI_ERROR) {
+        DeleteObject(bmp); DeleteDC(dc); return FALSE;
+    }
+    g_renderer.contrast_dc = dc;
+    g_renderer.contrast_bitmap = bmp;
+    g_renderer.contrast_old = old;
+    SetStretchBltMode(dc, COLORONCOLOR);
+    return TRUE;
+}
+
+BOOL RendererRefreshContrast(HWND window, const Settings *s) {
+    if (!s->auto_contrast || !IsWindowVisible(window) || !g_renderer.base ||
+        !g_renderer.screen || !InitContrastBuffer()) return FALSE;
+    RECT r = {0};
+    if (!GetWindowRect(window, &r)) return FALSE;
+    /* Sample the digits region, not the frame/progress track. GetDC(NULL) uses
+       virtual desktop coordinates. Omit CAPTUREBLT so the layered overlay is
+       not intentionally included in the capture. No pixels are retained/sent. */
+    int x0 = g_renderer.width / 5, y0 = g_renderer.height / 3;
+    int w = g_renderer.width - 2 * x0, h = g_renderer.height - 2 * y0;
+    if (!StretchBlt(g_renderer.contrast_dc, 0, 0, SAMPLE_W, SAMPLE_H,
+        g_renderer.screen, r.left + x0, r.top + y0, w, h, SRCCOPY)) return FALSE;
+    GdiFlush();
+    double luminance = 0;
+    for (int y = 0; y < SAMPLE_H; ++y) {
+        int sy = y0 + (2 * y + 1) * h / (2 * SAMPLE_H);
+        for (int x = 0; x < SAMPLE_W; ++x) {
+            int sx = x0 + (2 * x + 1) * w / (2 * SAMPLE_W);
+            uint32_t panel = g_renderer.base[sy * g_renderer.width + sx];
+            uint32_t sample = g_renderer.contrast_pixels[y * SAMPLE_W + x];
+            luminance += ContrastCompositedLuminance(sample, panel);
+        }
+    }
+    luminance /= SAMPLE_W * SAMPLE_H;
+    BOOL white = ContrastUseWhite(luminance, g_renderer.contrast_ready,
+                                  g_renderer.auto_color == RGB(255, 255, 255));
+    COLORREF color = white ? RGB(255, 255, 255) : RGB(0, 0, 0);
+    BOOL changed = !g_renderer.contrast_ready || color != g_renderer.auto_color;
+    g_renderer.contrast_ready = TRUE;
+    g_renderer.auto_color = color;
+    return changed;
+}
+
 static void DrawLineProgress(double fraction, COLORREF color) {
     int w = g_renderer.width, h = g_renderer.height;
     int margin = MulDiv(22, (int)g_renderer.dpi, 96);
@@ -206,6 +284,36 @@ static void DrawTextMask(LPCWSTR text) {
     DrawTextW(g_renderer.mask_dc, text, -1, &rect,
               DT_CENTER | DT_VCENTER | DT_SINGLELINE | DT_NOPREFIX);
     SelectObject(g_renderer.mask_dc, old_font);
+    GdiFlush();
+}
+
+static int MaskCoverage(uint32_t mask) {
+    return ((int)(mask & 255) + (int)((mask >> 8) & 255) +
+            (int)((mask >> 16) & 255)) / 3;
+}
+
+static void DrawContrastOutline(COLORREF fill) {
+    int edge = fill == RGB(0, 0, 0) ? 255 : 0;
+    int w = g_renderer.width, h = g_renderer.height;
+    int radius = MulDiv(2, (int)g_renderer.dpi, 96);
+    if (radius < 1) radius = 1;
+    for (int y = radius; y < h - radius; ++y) {
+        for (int x = radius; x < w - radius; ++x) {
+            int i = y * w + x;
+            int own = MaskCoverage(g_renderer.mask[i]);
+            if (own > 230) continue;
+            int best = own;
+            for (int dy = -radius; dy <= radius; ++dy) {
+                int span = radius - abs(dy);
+                for (int dx = -span; dx <= span; ++dx) {
+                    int coverage = MaskCoverage(g_renderer.mask[i + dy * w + dx]);
+                    if (coverage > best) best = coverage;
+                }
+            }
+            if (best > own) g_renderer.pixels[i] = BlendPixel(
+                g_renderer.pixels[i], edge, edge, edge, (best - own) * 220 / 255);
+        }
+    }
 }
 
 BOOL RendererApplySettings(HWND window, const Settings *s) {
@@ -261,6 +369,7 @@ void RendererDraw(HWND window, const Settings *s, ULONGLONG shown_seconds,
     if (fraction < 0.0) fraction = 0.0;
     if (fraction > 1.0) fraction = 1.0;
     COLORREF progress = shown_seconds <= 60 ? s->warning_color : s->normal_color;
+    if (s->auto_contrast && expired && blink_white) fraction = 1.0;
     if (s->theme == THEME_RING) DrawRingProgress(fraction, progress);
     else DrawLineProgress(fraction, progress);
 
@@ -268,11 +377,14 @@ void RendererDraw(HWND window, const Settings *s, ULONGLONG shown_seconds,
     WCHAR text[32]; wsprintfW(text, L"%02d:%02d", minutes, seconds);
     DrawTextMask(text);
     COLORREF fg = expired ? (blink_white ? RGB(255,255,255) : s->warning_color) : progress;
+    if (s->auto_contrast && g_renderer.contrast_ready) {
+        fg = g_renderer.auto_color;
+        DrawContrastOutline(fg);
+    }
     int fr = GetRValue(fg), fg_green = GetGValue(fg), fb = GetBValue(fg);
     int count = g_renderer.width * g_renderer.height;
     for (int i = 0; i < count; ++i) {
-        uint32_t m = g_renderer.mask[i];
-        int coverage = ((int)(m & 255) + (int)((m >> 8) & 255) + (int)((m >> 16) & 255)) / 3;
+        int coverage = MaskCoverage(g_renderer.mask[i]);
         if (coverage) g_renderer.pixels[i] = BlendPixel(g_renderer.pixels[i], fr, fg_green, fb, coverage);
     }
 

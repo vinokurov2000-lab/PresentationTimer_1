@@ -82,6 +82,13 @@ static void EnsureTimerTicking(void) {
     else KillTimer(g_timer_window, TIMER_ID);
 }
 
+static void UpdateContrastTimer(void) {
+    if (g_settings.auto_contrast && IsWindowVisible(g_timer_window)) {
+        SetTimer(g_timer_window, CONTRAST_TIMER_ID, 250, NULL);
+        RendererRefreshContrast(g_timer_window, &g_settings);
+    } else KillTimer(g_timer_window, CONTRAST_TIMER_ID);
+}
+
 static void RenderTimer(BOOL force) {
     if (force) g_timer.visual_token = -1;
     if (!force && !TimerVisualChanged(&g_timer)) return;
@@ -109,6 +116,7 @@ static void ToggleVisibility(void) {
     g_settings.visible = !IsWindowVisible(g_timer_window);
     ShowWindow(g_timer_window, g_settings.visible ? SW_SHOWNOACTIVATE : SW_HIDE);
     SettingsSave(&g_settings);
+    UpdateContrastTimer();
     if (g_settings.visible) RenderTimer(TRUE);
 }
 
@@ -124,6 +132,7 @@ static void ApplyVisualSettings(void) {
     RendererApplySettings(g_timer_window, &g_settings);
     PlatformClampWindow(g_timer_window);
     CaptureWindowPosition();
+    UpdateContrastTimer();
     RenderTimer(TRUE);
 }
 
@@ -170,13 +179,15 @@ static void CreateSettingsControls(HWND window) {
 
     AddControl(window, L"BUTTON", L"Пропускать клики мыши сквозь таймер",
                BS_AUTOCHECKBOX, 24, 384, 420, 26, IDC_CLICKTHROUGH);
+    AddControl(window, L"BUTTON", L"Автоконтраст цифр по фону под таймером",
+               BS_AUTOCHECKBOX | WS_TABSTOP, 24, 413, 470, 28, IDC_AUTO_CONTRAST);
     AddControl(window, L"STATIC",
         L"Горячие клавиши работают во всех программах. Если сочетание занято,\nтаймер покажет предупреждение при запуске.",
-        0, 24, 425, 480, 42, 0);
+        0, 24, 456, 480, 42, 0);
     AddControl(window, L"BUTTON", L"Открыть наглядную справку  ·  Ctrl+Alt+F1",
-               BS_PUSHBUTTON, 24, 480, 480, 36, IDC_OPEN_HELP);
-    AddControl(window, L"BUTTON", L"Отмена", BS_PUSHBUTTON, 280, 555, 104, 36, IDC_CANCEL);
-    AddControl(window, L"BUTTON", L"Сохранить", BS_DEFPUSHBUTTON, 396, 555, 108, 36, IDC_SAVE);
+               BS_PUSHBUTTON, 24, 513, 480, 36, IDC_OPEN_HELP);
+    AddControl(window, L"BUTTON", L"Отмена", BS_PUSHBUTTON, 280, 580, 104, 36, IDC_CANCEL);
+    AddControl(window, L"BUTTON", L"Сохранить", BS_DEFPUSHBUTTON, 396, 580, 108, 36, IDC_SAVE);
 
     SetNumber(window, IDC_MINUTES, g_edit_settings.duration_seconds / 60);
     SetNumber(window, IDC_SECONDS, g_edit_settings.duration_seconds % 60);
@@ -190,6 +201,7 @@ static void CreateSettingsControls(HWND window) {
     SendDlgItemMessageW(window, IDC_SOUND, CB_ADDSTRING, 0, (LPARAM)L"Двойной сигнал");
     SendDlgItemMessageW(window, IDC_SOUND, CB_ADDSTRING, 0, (LPARAM)L"Тройной сигнал");
     SendDlgItemMessageW(window, IDC_SOUND, CB_SETCURSEL, g_edit_settings.end_sound - 1, 0);
+    CheckDlgButton(window, IDC_AUTO_CONTRAST, g_edit_settings.auto_contrast ? BST_CHECKED : BST_UNCHECKED);
     CheckDlgButton(window, IDC_CLICKTHROUGH, g_edit_settings.click_through ? BST_CHECKED : BST_UNCHECKED);
     ColorButtonText(window, IDC_NORMAL_COLOR, g_edit_settings.normal_color);
     ColorButtonText(window, IDC_WARNING_COLOR, g_edit_settings.warning_color);
@@ -202,7 +214,7 @@ static void OpenSettings(void) {
     g_restore_timer_visibility = IsWindowVisible(g_timer_window);
     if (g_restore_timer_visibility) EnableWindow(g_timer_window, FALSE);
     int width = MulDiv(550, (int)GetDpiForSystem(), 96);
-    int height = MulDiv(640, (int)GetDpiForSystem(), 96);
+    int height = MulDiv(660, (int)GetDpiForSystem(), 96);
     g_settings_window = CreateWindowExW(WS_EX_DLGMODALFRAME | WS_EX_TOPMOST,
         L"PresentationTimerSettings", L"Настройки таймера",
         WS_CAPTION | WS_SYSMENU, CW_USEDEFAULT, CW_USEDEFAULT, width, height,
@@ -243,6 +255,7 @@ static void SaveSettingsDialog(HWND window) {
     int sound = (int)SendDlgItemMessageW(window, IDC_SOUND, CB_GETCURSEL, 0, 0);
     g_edit_settings.theme = theme >= 0 ? (TimerTheme)theme : THEME_GLASS;
     g_edit_settings.end_sound = sound >= 0 ? sound + 1 : 2;
+    g_edit_settings.auto_contrast = IsDlgButtonChecked(window, IDC_AUTO_CONTRAST) == BST_CHECKED;
     g_edit_settings.click_through = IsDlgButtonChecked(window, IDC_CLICKTHROUGH) == BST_CHECKED;
     g_edit_settings.x = g_settings.x; g_edit_settings.y = g_settings.y;
     g_edit_settings.visible = g_settings.visible;
@@ -307,7 +320,7 @@ static void PaintHelp(HWND window) {
     RECT second = {first.right + gap, top, client.right - margin, top + card_height};
     RECT third = {margin, first.bottom + gap, client.right - margin, first.bottom + gap + MulDiv(150, dpi, 96)};
     DrawHelpCard(dc, first, L"Отсчёт",
-        L"Ctrl+Alt+Пробел   Старт / пауза\nCtrl+Alt+R              Сброс",
+        L"Ctrl+Alt+Пробел   Старт / пауза\nCtrl+Alt+0              Сброс",
         L"Ctrl+Alt+↑ или ↓ добавляет или убирает одну минуту.", dpi);
     DrawHelpCard(dc, second, L"Окно таймера",
         L"Ctrl+Alt+H              Скрыть / показать\nCtrl+Alt+S              Настройки",
@@ -399,6 +412,11 @@ static LRESULT CALLBACK TimerProc(HWND window, UINT message, WPARAM wp, LPARAM l
             RenderTimer(TRUE); return 0;
         }
         case WM_TIMER:
+            if (wp == CONTRAST_TIMER_ID) {
+                if (RendererRefreshContrast(window, &g_settings)) RenderTimer(TRUE);
+                return 0;
+            }
+            if (wp != TIMER_ID) return 0;
             if (TimerTick(&g_timer)) PlatformPlaySound(g_settings.end_sound);
             if (TimerVisualChanged(&g_timer)) RenderTimer(TRUE);
             EnsureTimerTicking(); return 0;
@@ -421,7 +439,9 @@ static LRESULT CALLBACK TimerProc(HWND window, UINT message, WPARAM wp, LPARAM l
             return 0;
         case WM_RBUTTONUP: OpenSettings(); return 0;
         case WM_EXITSIZEMOVE: {
-            CaptureWindowPosition(); SettingsSave(&g_settings); return 0;
+            CaptureWindowPosition(); SettingsSave(&g_settings);
+            if (RendererRefreshContrast(window, &g_settings)) RenderTimer(TRUE);
+            return 0;
         }
         case WM_DPICHANGED: {
             RECT *suggested = (RECT *)lp;
@@ -491,6 +511,8 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE previous, PWSTR command, int s
         0, 0, 340, 130, NULL, NULL, instance, NULL);
     if (!window) { CloseHandle(mutex); return 1; }
     if (g_settings.visible) ShowWindow(window, SW_SHOWNOACTIVATE);
+    UpdateContrastTimer();
+    RenderTimer(TRUE);
     UpdateWindow(window);
 
     MSG message;

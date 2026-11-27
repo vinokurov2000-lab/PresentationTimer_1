@@ -38,6 +38,7 @@ void SettingsLoad(Settings *s) {
     s->background_transparency = ReadInt(L"BackgroundTransparency", 12);
     s->end_sound = ReadInt(L"EndSound", 2);
     s->theme = (TimerTheme)ReadInt(L"Theme", THEME_GLASS);
+    s->auto_contrast = ReadInt(L"AutoContrast", 0) != 0;
     s->click_through = ReadInt(L"ClickThrough", 0) != 0;
     s->visible = ReadInt(L"Visible", 1) != 0;
     s->x = ReadInt(L"X", CW_USEDEFAULT);
@@ -60,6 +61,7 @@ BOOL SettingsSave(const Settings *s) {
     ok = WriteInt(L"BackgroundTransparency", s->background_transparency) && ok;
     ok = WriteInt(L"EndSound", s->end_sound) && ok;
     ok = WriteInt(L"Theme", (int)s->theme) && ok;
+    ok = WriteInt(L"AutoContrast", s->auto_contrast) && ok;
     ok = WriteInt(L"ClickThrough", s->click_through) && ok;
     ok = WriteInt(L"Visible", s->visible) && ok;
     ok = WriteInt(L"X", s->x) && ok;

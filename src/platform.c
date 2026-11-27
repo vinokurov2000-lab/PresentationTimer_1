@@ -64,7 +64,7 @@ void PlatformPlaySound(int sound_id) {
 typedef struct { int id; UINT key; LPCWSTR label; } HotkeyDef;
 static const HotkeyDef g_hotkeys[] = {
     {HK_TOGGLE, VK_SPACE, L"Ctrl+Alt+Пробел — старт/пауза"},
-    {HK_RESET, 'R', L"Ctrl+Alt+R — сброс"},
+    {HK_RESET, '0', L"Ctrl+Alt+0 — сброс"},
     {HK_SETTINGS, 'S', L"Ctrl+Alt+S — настройки"},
     {HK_ADD, VK_UP, L"Ctrl+Alt+Вверх — добавить минуту"},
     {HK_SUB, VK_DOWN, L"Ctrl+Alt+Вниз — убрать минуту"},

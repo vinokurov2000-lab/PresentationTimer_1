@@ -12,12 +12,13 @@
 #include <stdint.h>
 
 #define APP_NAME L"Таймер презентации"
-#define APP_VERSION L"5.0.0"
+#define APP_VERSION L"5.1.1"
 #define APP_ICON 101
 
 #define WM_TRAY (WM_APP + 1)
 #define WM_HOTKEY_WARNING (WM_APP + 2)
 #define TIMER_ID 1
+#define CONTRAST_TIMER_ID 2
 
 #define HK_TOGGLE 101
 #define HK_RESET 102
@@ -48,6 +49,7 @@
 #define IDC_THEME 312
 #define IDC_PREVIEW_SOUND 313
 #define IDC_OPEN_HELP 314
+#define IDC_AUTO_CONTRAST 315
 
 typedef enum {
     THEME_GLASS = 0,
@@ -64,6 +66,7 @@ typedef struct {
     int background_transparency;
     int end_sound;
     TimerTheme theme;
+    BOOL auto_contrast;
     BOOL click_through;
     BOOL visible;
     int x;

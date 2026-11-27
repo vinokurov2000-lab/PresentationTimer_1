@@ -1,0 +1,48 @@
+name: Publish Presentation Timer v5.1.1
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - ".github/workflows/release-v5-1-1.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: presentation-timer-v5.1.1-release
+  cancel-in-progress: false
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Verify and publish v5.1.1
+        if: github.ref == 'refs/heads/main'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TARGET_COMMIT: ${{ github.sha }}
+        run: |
+          set -euo pipefail
+          if gh release view v5.1.1 >/dev/null 2>&1; then
+            echo "Release v5.1.1 already exists; leaving it unchanged."
+            exit 0
+          fi
+          archive=PresentationTimer-v5.1.1-Windows-x64.zip
+          printf '%s  %s\n' '641359fddbe359a9121e14dede6a13cb5ab35ad767eb90b21cdb9c8d8727beb8' "$archive" | sha256sum --check
+          unzip -t "$archive"
+          assets="$(mktemp -d)"
+          unzip -j "$archive" '*/PresentationTimer-v5.1.1.exe' -d "$assets"
+          gh release create v5.1.1 "$archive" "$assets/PresentationTimer-v5.1.1.exe" \
+            --target "$TARGET_COMMIT" \
+            --title "Presentation Timer v5.1.1" \
+            --notes-file - <<'EOF'
+          - В настройках появился опциональный автоконтраст цифр по фону под таймером. Ручной выбор цвета сохранён.
+          - Сброс отсчёта теперь по Ctrl+Alt+0 (цифра 0 в верхнем ряду клавиатуры).
+
+          Для Windows 10/11 x64, без установки. ZIP содержит приложение, инструкцию и исходники. Сборка и тесты расчёта контраста проверены; работа поверх полноэкранного PowerPoint на Windows отдельно не проверена.
+          EOF
